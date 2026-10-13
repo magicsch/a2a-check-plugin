@@ -1,0 +1,9 @@
+{
+  "name": "a2a-check",
+  "version": "0.9.0",
+  "description": "Checks the configuration and loop definitions of a Claude Code agent with a2a.training: the skill a2a-check, the skill a2a-check-apply and the hooks that write failure reports. It makes no request until the operator has set the agent credential, and it sends nothing until the operator has switched to the mode senden.",
+  "author": {
+    "name": "a2a-check"
+  },
+  "keywords": ["a2a-check", "agent-setup", "findings", "failure-reports"]
+}

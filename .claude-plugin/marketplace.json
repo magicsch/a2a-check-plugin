@@ -1,0 +1,17 @@
+{
+  "name": "a2a-check",
+  "owner": {
+    "name": "a2a-check"
+  },
+  "metadata": {
+    "description": "The reference package of a2a.training for Claude Code, published as a plugin."
+  },
+  "plugins": [
+    {
+      "name": "a2a-check",
+      "source": "./",
+      "description": "Skill a2a-check, skill a2a-check-apply and the failure-report hooks of a2a.training. No request without the agent credential; beobachten is the default mode.",
+      "version": "0.9.0"
+    }
+  ]
+}

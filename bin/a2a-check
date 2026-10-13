@@ -1,0 +1,215 @@
+#!/bin/sh
+# a2a-check: the reference package for claude-code (R-37, R-38, R-44; MVP-R-23,
+# decision 0048). POSIX sh and curl only.
+#
+#   a2a-check preview   read the release rule, assemble what it allows, show it
+#   a2a-check confirm   record that this preview was seen (needed before a send)
+#   a2a-check submit    beobachten: assemble and show, send nothing
+#                       senden: send what was previewed and confirmed, once
+#   a2a-check report T  write (and in senden send) a failure report by hand
+#   a2a-check addressed ID...  record which finding ids the agent has addressed
+#                       (a file in the workspace, no network; used by the skill
+#                       a2a-check-apply, MVP-R-18)
+#   a2a-check reset     forget which reports and submissions were already made
+#                       (and the chain of checks: the next send starts a new one)
+#
+# Mode: A2A_CHECK_MODE=beobachten (default) or senden. See ../README.md.
+#
+# In senden the loop of MVP-R-24 runs from here: submit, poll the check with
+# backoff until it is closed (MVP-R-08: no callback, only polling), save its
+# finding list for the skill a2a-check-apply, and, once the agent has recorded
+# addressed findings (a2a-check addressed) and the setup has changed, submit the
+# re-check with `recheck_of` (the last check of that data class) and
+# `addressed_finding_ids`. A2A_POLL_SLEEPS is the backoff, seconds between polls.
+set -u
+LC_ALL=C
+export LC_ALL
+here=$(cd "$(dirname "$0")" && pwd)
+A2A_LIB="$here/../lib"
+# shellcheck source=../lib/common.sh
+. "$A2A_LIB/common.sh"
+a2a_init || exit 2
+
+usage() {
+  a2a_err "usage: a2a-check preview | confirm | submit | report <trigger> | addressed <id>... | reset"
+  exit 2
+}
+
+# The release rule (R-05) is read before anything is assembled; without it
+# nothing is.
+read_rule_and_assemble() {
+  mkdir -p "$A2A_DIR"
+  if ! a2a_read_policy; then
+    a2a_err "release rule not readable (A2A_CHECK_URL, A2A_AGENT_TOKEN, service): nothing assembled"
+    exit 2
+  fi
+  a2a_assemble
+  a2a_preview
+}
+
+# The check of a submission, with its finding list in the finding contract
+# (finding ids, proposals, pattern ids), is fetched and left for the skill to
+# read; so is the public pattern catalogue. Each check is kept under its own
+# id in findings/<check id>.json, so a new check never overwrites the findings
+# of an earlier one; findings-<data class>.json is the copy of the latest
+# check, the one the skill reads. A file is written only once its request
+# answered 200, so a missing file is what a later run retries.
+fetch_check_results() {
+  _fclass=$1
+  _fcheck=$2
+  _frefresh=${3:-}
+  [ -n "$_fcheck" ] || return 0
+  mkdir -p "$A2A_DIR/findings"
+  if [ ! -s "$A2A_DIR/findings/$_fcheck.json" ]; then
+    # Polled with backoff until the check is closed (done, partial, failed); a
+    # failed request, or a check still running after the last wait, is left for
+    # a later run and never a reason to send again.
+    for _fwait in ${A2A_POLL_SLEEPS:-2 4 8 16 30} stop; do
+      _fcode=$(a2a_api GET "/v1/checks/$_fcheck") || return 0
+      if [ "$_fcode" != 200 ]; then rm -f "$A2A_BODY"; break; fi
+      # the last "state" of the body is the current one (the transitions end with it)
+      _fstate=$(sed -n 's/.*"state"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' "$A2A_BODY")
+      case $_fstate in
+        done|partial|failed) mv "$A2A_BODY" "$A2A_DIR/findings/$_fcheck.json"; break ;;
+      esac
+      rm -f "$A2A_BODY"
+      if [ "$_fwait" = stop ]; then
+        a2a_say "$_fclass: check $_fcheck still running, read again at the next run"
+        break
+      fi
+      sleep "$_fwait"
+    done
+  fi
+  if [ -s "$A2A_DIR/findings/$_fcheck.json" ]; then
+    cp "$A2A_DIR/findings/$_fcheck.json" "$A2A_DIR/findings-$_fclass.json"
+    a2a_say "$_fclass: check saved to $A2A_DIR/findings-$_fclass.json"
+  fi
+  # The catalogue is read again after every new send, so a version the service
+  # has moved to since the last one is picked up; a failed read keeps the file.
+  if [ -n "$_frefresh" ] || [ ! -s "$A2A_DIR/patterns.json" ]; then
+    _fcode=$(a2a_api GET /v1/catalog/patterns) || return 0
+    if [ "$_fcode" = 200 ]; then mv "$A2A_BODY" "$A2A_DIR/patterns.json"; else rm -f "$A2A_BODY"; fi
+  fi
+  return 0
+}
+
+send_class() {
+  _class=$1
+  _dir="$A2A_DIR/submission/$_class"
+  [ -d "$_dir" ] || return 0
+  _digest=$(a2a_class_digest "$_class")
+  mkdir -p "$A2A_DIR/sent"
+  _marker="$A2A_DIR/sent/$_class-$_digest"
+  if [ -e "$_marker" ]; then
+    a2a_say "$_class: already sent unchanged, not sent again"
+    # The submission is stored, but its check may not have been saved (a
+    # request failed after the send): that is retried here, never the send.
+    fetch_check_results "$_class" "$(cat "$_marker")"
+    return 0
+  fi
+  set -- -F "data_class=$_class"
+  [ "$_class" = configuration ] && set -- "$@" -F harness=claude-code
+  # A re-check names the last check of this data class and the findings the
+  # agent recorded as addressed (only ids in the form of a finding id are sent).
+  _recheck=
+  _sent=
+  if [ -s "$A2A_DIR/last-check-$_class" ]; then
+    _recheck=$(cat "$A2A_DIR/last-check-$_class")
+    set -- "$@" -F "recheck_of=$_recheck"
+    # Only the ids that are in the saved finding list of this data class's last
+    # check go with this re-check (the ids of the other class stay for its own).
+    if [ -f "$A2A_DIR/addressed-findings" ] && [ -s "$A2A_DIR/findings/$_recheck.json" ]; then
+      for _aid in $(grep -E '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' "$A2A_DIR/addressed-findings"); do
+        grep -qs "\"finding_id\"[[:space:]]*:[[:space:]]*\"$_aid\"" "$A2A_DIR/findings/$_recheck.json" || continue
+        set -- "$@" -F "addressed_finding_ids=$_aid"
+        _sent="$_sent $_aid"
+      done
+    fi
+  fi
+  while IFS= read -r _rel; do
+    set -- "$@" -F "files=@$_dir/$_rel;filename=$_rel"
+  done <<EOF
+$(cd "$_dir" && find . -type f | sed 's|^\./||' | sort)
+EOF
+  # The service's own budget for a check is 60 seconds; the client waits longer,
+  # so it never gives up on a submission the server is still storing.
+  _code=$(A2A_MAX_TIME=75 a2a_api POST /v1/submissions "$@") || { a2a_err "no request possible"; return 1; }
+  if [ "$_code" != 200 ]; then
+    a2a_err "$_class not accepted (HTTP $_code)"
+    case $_code in
+      404) if [ -n "$_recheck" ]; then
+             # the earlier check is gone (retention): start a new chain, once
+             rm -f "$A2A_BODY" "$A2A_DIR/last-check-$_class"
+             send_class "$_class"; return $?
+           fi ;;
+      409) a2a_err "the earlier check is not finished or a finding is escalated: $(cat "$A2A_BODY")" ;;
+    esac
+    rm -f "$A2A_BODY"; return 1
+  fi
+  _response=$(cat "$A2A_BODY")
+  _id=$(printf '%s' "$_response" |
+    sed -n 's/.*"submission_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  _check=$(printf '%s' "$_response" |
+    sed -n 's/.*"check_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  rm -f "$A2A_BODY"
+  # The marker keeps the check id, so the fetch can be retried without a resend.
+  printf '%s\n' "$_check" > "$_marker"
+  printf '%s\n' "$_check" > "$A2A_DIR/last-check-$_class"
+  # the addressed findings that went with this re-check are done; those of the
+  # other data class, and those of a send that failed, stay
+  for _aid in $_sent; do
+    grep -v "^$_aid\$" "$A2A_DIR/addressed-findings" > "$A2A_DIR/.addressed" || true
+    mv "$A2A_DIR/.addressed" "$A2A_DIR/addressed-findings"
+  done
+  [ -s "$A2A_DIR/addressed-findings" ] || rm -f "$A2A_DIR/addressed-findings"
+  a2a_say "$_class: stored as submission $_id"
+  fetch_check_results "$_class" "$_check" refresh
+}
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+case $cmd in
+  preview)
+    read_rule_and_assemble ;;
+  confirm)
+    [ -f "$A2A_DIR/preview.txt" ] || { a2a_err "run a2a-check preview first"; exit 2; }
+    a2a_preview_digest > "$A2A_DIR/confirmed"
+    a2a_say "preview confirmed; it is sent only with A2A_CHECK_MODE=senden" ;;
+  submit)
+    read_rule_and_assemble
+    if [ "$MODE" = beobachten ]; then
+      a2a_say "Betriebsart beobachten: nichts gesendet; die Einreichung liegt in $A2A_DIR/submission"
+      exit 0
+    fi
+    if [ ! -f "$A2A_DIR/confirmed" ] || [ "$(cat "$A2A_DIR/confirmed")" != "$(a2a_preview_digest)" ]; then
+      a2a_say "Nichts gesendet: diese Vorschau ist noch nicht bestätigt (a2a-check confirm)."
+      exit 3
+    fi
+    status=0
+    for class in configuration loop; do send_class "$class" || status=1; done
+    exit $status ;;
+  report)
+    [ $# -eq 1 ] || usage
+    case $1 in abort|budget_exceeded|tool_failed|timeout|contradiction|manual) ;; *) usage ;; esac
+    a2a_emit_report "$1" system_instructions ;;
+  addressed)
+    # MVP-R-18: only ids of a saved finding list are recorded, in the workspace,
+    # and nothing leaves the machine (no request is made here).
+    [ $# -ge 1 ] || usage
+    mkdir -p "$A2A_DIR"
+    for id in "$@"; do
+      printf '%s\n' "$id" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' ||
+        { a2a_err "not a finding id: $id"; exit 2; }
+      grep -qs "\"finding_id\"[[:space:]]*:[[:space:]]*\"$id\"" "$A2A_DIR"/findings/*.json ||
+        { a2a_err "no saved finding list has the id $id"; exit 2; }
+    done
+    { [ -f "$A2A_DIR/addressed-findings" ] && cat "$A2A_DIR/addressed-findings"
+      printf '%s\n' "$@"; } | sort -u > "$A2A_DIR/.addressed" &&
+      mv "$A2A_DIR/.addressed" "$A2A_DIR/addressed-findings"
+    a2a_say "addressed: $(wc -l < "$A2A_DIR/addressed-findings" | tr -d ' ') finding id(s) in $A2A_DIR/addressed-findings" ;;
+  reset)
+    rm -rf "$A2A_DIR/reported" "$A2A_DIR/sent" "$A2A_DIR/confirmed" "$A2A_DIR/findings" \
+      "$A2A_DIR"/findings-*.json "$A2A_DIR"/last-check-* "$A2A_DIR/addressed-findings"
+    a2a_say "reset" ;;
+  *) usage ;;
+esac

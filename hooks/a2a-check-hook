@@ -1,0 +1,49 @@
+#!/bin/sh
+# a2a-check hook for claude-code: PreToolUse, PostToolUse and Stop (R-37, R-23;
+# decision 0048). It never blocks the agent: no output on stdout and always
+# exit 0.
+#
+#   PreToolUse          reads the release rule once (R-05) when no copy is there
+#   PostToolUse         successful calls only: nothing to report
+#   PostToolUseFailure  a failed tool call becomes a failure report (trigger
+#                       tool_failed; trigger abort when `is_interrupt` is true)
+#   Stop                an ordinary stop: nothing to report
+#   StopFailure         the turn ended with an API error: abort, or
+#                       budget_exceeded for a used-up limit, quota or balance
+#                       (the mapping of `error` is in decision 0048)
+#
+# A run the user cancels fires no hook of its own; that is a limit of the
+# package, not worked around here.
+#
+# A report holds fixed sentences only, never a line of the tool's output. In the
+# mode beobachten it is written locally and nothing is sent (R-38); in senden it
+# is sent when the release rule allows failure_report.
+set -u
+LC_ALL=C
+export LC_ALL
+here=$(cd "$(dirname "$0")" && pwd)
+A2A_LIB="$here/../lib"
+# shellcheck source=../lib/common.sh
+. "$A2A_LIB/common.sh"
+a2a_init 2>/dev/null || exit 0
+
+input=$(cat | tr '\n' ' ')
+event=$(a2a_json_first "$input" hook_event_name)
+
+case $event in
+  PreToolUse)
+    if [ ! -f "$A2A_DIR/policy.json" ]; then
+      mkdir -p "$A2A_DIR"
+      a2a_read_policy || :
+    fi ;;
+  PostToolUseFailure)
+    tool=$(a2a_json_first "$input" tool_name)
+    if a2a_is_interrupt "$input"; then trigger=abort; else trigger=tool_failed; fi
+    a2a_emit_report "$trigger" "$(a2a_tool_component "$tool")" ;;
+  StopFailure)
+    trigger=$(a2a_stop_failure_trigger "$(a2a_json_first "$input" error)")
+    [ -n "$trigger" ] && a2a_emit_report "$trigger" system_instructions ;;
+  PostToolUse|Stop)
+    : ;;  # successful calls and ordinary stops are no failure
+esac
+exit 0
