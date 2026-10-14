@@ -9,12 +9,12 @@ submission through the API is equivalent (R-38).
 The same package is a Claude Code plugin: this directory holds `.claude-plugin/plugin.json`, the
 marketplace file `.claude-plugin/marketplace.json` and `hooks/hooks.json`. Install it with
 
-    /plugin marketplace add <owner>/<repo>
+    /plugin marketplace add magicsch/a2a-check-plugin
     /plugin install a2a-check@a2a-check
 
-(on the command line `claude plugin marketplace add <owner>/<repo>` and `claude plugin install
-a2a-check@a2a-check`; a local clone works as `<owner>/<repo>`, give its path). `<owner>/<repo>` is the
-repository that holds this directory as its root; putting it online is the owner's step, the service
+(on the command line `claude plugin marketplace add magicsch/a2a-check-plugin` and `claude plugin install
+a2a-check@a2a-check`; a local clone works too, give its path instead of `magicsch/a2a-check-plugin`). `magicsch/a2a-check-plugin` is the
+repository that holds this directory as its root; keeping it up to date is the owner's step, the service
 does not do it. The plugin brings the skills `a2a-check` and `a2a-check-apply`, the hooks and
 `bin/a2a-check`; it contains no credential. **An installed plugin does nothing until you set the
 variables below**: without `A2A_AGENT_TOKEN` the hooks make no request at all; with it, in the default

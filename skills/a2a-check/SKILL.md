@@ -1,6 +1,6 @@
 ---
 name: a2a-check
-description: Check this agent's configuration and loop definitions with a2a.training and read the finding list. Use when the operator asks to check, preview or submit the agent's setup, or to read the findings of a check.
+description: Run a2a-check on this agent's setup (CLAUDE.md, .claude/settings.json, loop definitions, an agent folder) with the a2a.training check service, preview the submission package, or read back a finished check (finding list, scores per rule class, check_id). Use whenever the operator wants the setup checked, validated or scored before going live, asks what the last check flagged, or names A2A_CHECK_MODE, beobachten or senden; English and German ("Prüf die Konfiguration mit a2a.training", "schick das Paket ab"). Not for fixing the findings afterwards (a2a-check-apply), editing CLAUDE.md or writing skills.
 ---
 
 # a2a-check
