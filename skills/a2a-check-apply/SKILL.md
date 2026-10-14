@@ -1,6 +1,6 @@
 ---
 name: a2a-check-apply
-description: Work through the findings of an a2a-check result. Use when the operator asks to act on the findings of a check, to improve the setup after a check, or to record which findings were addressed.
+description: Act on a finished a2a-check result, the step after the check ran. Work through the saved findings (by id such as AU-01, by severity, "what the check flagged"), apply the proposals to this project's config files, and record which finding ids were addressed, including the addressed_finding_ids for the re-check. Use whenever the operator wants the setup improved after a check or asks what is fixed versus still open; English and German ("Befunde abarbeiten", "merk dir, welche behandelt sind"). Not for running or submitting a check (a2a-check), reading a score alone, or findings from linters or PR reviewers.
 ---
 
 # a2a-check-apply
