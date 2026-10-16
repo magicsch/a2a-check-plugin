@@ -1,0 +1,17 @@
+{
+  "name": "a2a-check-cowork",
+  "owner": {
+    "name": "a2a-check"
+  },
+  "metadata": {
+    "description": "The Claude Cowork plugin of a2a-check: the connector and the check instruction."
+  },
+  "plugins": [
+    {
+      "name": "a2a-check-cowork",
+      "source": "./",
+      "description": "Connector to the a2a-check service and the skill with the check instruction. No credential, no hook, no script.",
+      "version": "0.1.0"
+    }
+  ]
+}

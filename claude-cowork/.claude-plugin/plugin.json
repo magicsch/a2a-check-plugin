@@ -1,0 +1,13 @@
+{
+  "name": "a2a-check-cowork",
+  "version": "0.1.0",
+  "description": "Checks the setup of your AI agent with a2a-check. It brings the connector to the a2a-check service and one skill that carries the check instruction. It sends nothing until you have signed in, approved the connection and confirmed the files your AI shows you.",
+  "author": {
+    "name": "a2a-check"
+  },
+  "keywords": [
+    "a2a-check",
+    "agent-setup",
+    "findings"
+  ]
+}
