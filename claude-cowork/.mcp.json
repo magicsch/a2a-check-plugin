@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "a2a-check": {
+      "type": "http",
+      "url": "https://api.a2a-check.com/mcp"
+    }
+  }
+}
