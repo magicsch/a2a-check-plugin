@@ -3,7 +3,7 @@
 A plugin with two things and nothing else:
 
 - the **connector** to the a2a-check service, `.mcp.json`, with the address `https://api.a2a-check.com/mcp`;
-- one **skill**, `skills/check-setup/SKILL.md`, whose text is the check instruction (`catalog/check-instruction-1.0.0.md`
+- one **skill**, `skills/check-setup/SKILL.md`, whose text is the check instruction (`catalog/check-instruction-1.1.0.md`
   of the service, the text the prompt `check_setup` returns).
 
 It contains no credential, no hook and no script. Installing it makes no request: the first request comes when you sign
